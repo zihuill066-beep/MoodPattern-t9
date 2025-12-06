@@ -727,36 +727,34 @@ DEFAULT_DB_PATH = DATA_DIR / "mood_system.db"
 
 # ========== 数据库初始化 ==========
 def init_database(db_path: Path = DEFAULT_DB_PATH):
-    """初始化数据库"""
+    """初始化数据库 - 强制重建正确结构"""
+    # 连接数据库
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys=ON")
 
-    # 检查并添加salt字段（如果不存在）
-    try:
-        cursor = conn.execute("PRAGMA table_info(users)")
-        columns = [column[1] for column in cursor.fetchall()]
+    # ----【关键修改】强制删除旧表，确保创建新结构 ----
+    # 1. 删除旧表（如果存在）
+    conn.execute("DROP TABLE IF EXISTS mood_records;")
+    conn.execute("DROP TABLE IF EXISTS users;")
+    conn.execute("DROP TABLE IF EXISTS backup_logs;")  # 也清理旧的备份日志表
 
-        if 'salt' not in columns:
-            conn.execute("ALTER TABLE users ADD COLUMN salt TEXT NOT NULL DEFAULT ''")
-            print("已添加salt字段到users表")
-    except Exception as e:
-        print(f"检查表结构时出错: {e}")
-
-    # 创建用户表
+    # 2. 按当前代码的正确结构创建新表
+    # 创建用户表 (必须包含 password_hash 和 salt)
     conn.execute("""
-       CREATE TABLE IF NOT EXISTS users(
-           user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-           username TEXT UNIQUE NOT NULL,
-           password_hash TEXT NOT NULL,
-           salt TEXT NOT NULL,  --
-           email TEXT,
-           is_admin INTEGER DEFAULT 0,
-           created_at TEXT
-       );
-       """)
+    CREATE TABLE users(
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        email TEXT,
+        is_admin INTEGER DEFAULT 0,
+        created_at TEXT
+    );
+    """)
+
     # 创建情绪记录表
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS mood_records(
+    CREATE TABLE mood_records(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         mood_score INTEGER CHECK (mood_score BETWEEN 1 AND 10),
@@ -773,14 +771,14 @@ def init_database(db_path: Path = DEFAULT_DB_PATH):
     );
     """)
 
-    # 创建索引以提高查询性能
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON mood_records(user_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_record_date ON mood_records(record_date);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_mood_score ON mood_records(mood_score);")
+    # 创建索引
+    conn.execute("CREATE INDEX idx_user_id ON mood_records(user_id);")
+    conn.execute("CREATE INDEX idx_record_date ON mood_records(record_date);")
+    conn.execute("CREATE INDEX idx_mood_score ON mood_records(mood_score);")
 
     # 创建备份日志表
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS backup_logs(
+    CREATE TABLE backup_logs(
         log_id INTEGER PRIMARY KEY AUTOINCREMENT,
         backup_name TEXT,
         backup_time TEXT,
@@ -791,6 +789,11 @@ def init_database(db_path: Path = DEFAULT_DB_PATH):
     );
     """)
 
+    # 提交所有更改
+    conn.commit()
+    # ---------------------------------
+
+    print("✅ 数据库已强制重建为最新结构")
     return conn
 
 # 情绪标签映射
